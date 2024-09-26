@@ -1,0 +1,302 @@
+import discord
+from discord.ext import commands
+import sqlite3
+import aiohttp
+import logging
+import re
+
+intents = discord.Intents.default()
+bot = commands.Bot(command_prefix="!", intents=intents)
+
+# Database setup
+def setup_database():
+    conn = sqlite3.connect('finance_data.db')
+    c = conn.cursor()
+    c.execute('''
+        CREATE TABLE IF NOT EXISTS users (
+            user_id INTEGER PRIMARY KEY,
+            username TEXT NOT NULL
+        )
+    ''')
+    c.execute('''
+        CREATE TABLE IF NOT EXISTS transactions (
+            transaction_id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER,
+            type TEXT NOT NULL,
+            amount REAL NOT NULL,
+            description TEXT,
+            description_en TEXT,
+            date TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (user_id) REFERENCES users (user_id)
+        )
+    ''')
+    try:
+        c.execute('ALTER TABLE transactions ADD COLUMN description_en TEXT')
+    except sqlite3.OperationalError:
+        pass  # Column already exists
+    conn.commit()
+    conn.close()
+
+setup_database()
+
+async def translate_description(description, target_language='en'):
+    async with aiohttp.ClientSession() as session:
+        async with session.post(
+            'https://loybung.vercel.app/api/translate',
+            json={"message": description, "to": target_language}
+        ) as response:
+            if response.status == 200:
+                data = await response.json()
+                if data.get("success"):
+                    return data.get("message")
+                else:
+                    return None
+            else:
+                return None
+
+class IncomeModal(discord.ui.Modal, title='Record Income 💳'):
+    amount = discord.ui.TextInput(label='Enter the amount of income:', style=discord.TextStyle.short)
+    description = discord.ui.TextInput(label='Enter the description of income:', style=discord.TextStyle.long)
+
+    async def on_submit(self, interaction: discord.Interaction):
+        amount_input = self.amount.value
+        if not re.match(r'^\d+(\.\d{1,2})?$', amount_input):
+            await interaction.response.send_message("Invalid amount. Please enter a valid number.", ephemeral=True)
+            return
+
+        amount = float(amount_input)
+        description = self.description.value
+        user_id = interaction.user.id
+        username = interaction.user.name
+
+        description_en = await translate_description(description)
+
+        conn = sqlite3.connect('finance_data.db')
+        c = conn.cursor()
+        c.execute('INSERT OR IGNORE INTO users (user_id, username) VALUES (?, ?)', (user_id, username))
+        c.execute('''
+            INSERT INTO transactions (user_id, type, amount, description, description_en)
+            VALUES (?, ?, ?, ?, ?)
+        ''', (user_id, 'Income', amount, description, description_en))
+        conn.commit()
+        conn.close()
+
+        embed = discord.Embed(
+            title="Income Recorded 💳",
+            description=f"Amount: {amount} 💳\nDescription: {description} 💳\nDescriptionEN: {description_en} 💳",
+            color=discord.Color.from_str('#5043e2')
+        )
+        await interaction.response.send_message(embed=embed, ephemeral=True)
+
+        dm_embed = discord.Embed(
+            title="Income Recorded 💳",
+            description=f"Amount: {amount} 💳\nDescription: {description} 💳\nDescriptionEN: {description_en} 💳",
+            color=discord.Color.from_str('#5043e2')
+        )
+        try:
+            await interaction.user.send(embed=dm_embed)
+        except discord.Forbidden:
+            print(f"Unable to send DM to {interaction.user.name}")
+
+class ExpenseModal(discord.ui.Modal, title='Record Expense 💸'):
+    amount = discord.ui.TextInput(label='Enter the amount of expense:', style=discord.TextStyle.short)
+    description = discord.ui.TextInput(label='Enter the description of expense:', style=discord.TextStyle.long)
+
+    async def on_submit(self, interaction: discord.Interaction):
+        amount_input = self.amount.value
+        if not re.match(r'^\d+(\.\d{1,2})?$', amount_input):
+            await interaction.response.send_message("Invalid amount. Please enter a valid number.", ephemeral=True)
+            return
+
+        amount = float(amount_input)
+        description = self.description.value
+        user_id = interaction.user.id
+        username = interaction.user.name
+
+        description_en = await translate_description(description)
+
+        conn = sqlite3.connect('finance_data.db')
+        c = conn.cursor()
+        c.execute('INSERT OR IGNORE INTO users (user_id, username) VALUES (?, ?)', (user_id, username))
+        c.execute('''
+            INSERT INTO transactions (user_id, type, amount, description, description_en)
+            VALUES (?, ?, ?, ?, ?)
+        ''', (user_id, 'Expense', amount, description, description_en))
+        conn.commit()
+        conn.close()
+
+        embed = discord.Embed(
+            title="Expense Recorded 💸",
+            description=f"Amount: {amount} 💸\nDescription: {description} 💸\nDescriptionEN: {description_en} 💸",
+            color=discord.Color.from_str('#5043e2')
+        )
+        await interaction.response.send_message(embed=embed, ephemeral=True)
+
+        dm_embed = discord.Embed(
+            title="Expense Recorded 💸",
+            description=f"Amount: {amount} 💸\nDescription: {description} 💸\nDescriptionEN: {description_en} 💸",
+            color=discord.Color.from_str('#5043e2')
+        )
+        try:
+            await interaction.user.send(embed=dm_embed)
+        except discord.Forbidden:
+            print(f"Unable to send DM to {interaction.user.name}")
+
+class StartProcessView(discord.ui.View):
+    def __init__(self):
+        super().__init__(timeout=None)
+
+    @discord.ui.button(label="💻 Start Processes", style=discord.ButtonStyle.primary, custom_id="start_processes_button")
+    async def start_processes_button(self, interaction: discord.Interaction, button: discord.ui.Button):
+        embed = discord.Embed(
+            title="💻 Start Processes :  > Select Mode ✅",
+            description="",
+            color=discord.Color.from_str('#5043e2')
+        )
+        embed.add_field(
+            name="`Select Mode` | ",
+            value="**\n__Details:__\n```javascript\n🟢 Income :\n🟢 Expense :\n🟢 Balance :```",
+            inline=True
+        )
+        embed.set_image(url="https://singlecolorimage.com/get/5413e2/1000x10")
+        embed.set_author(name="Asula Summary Tools V3 🎆", icon_url="https://img5.pic.in.th/file/secure-sv1/Asula-logos-2.jpeg")
+        embed.set_thumbnail(url="https://example.com/thumbnail_image.png")
+        await interaction.response.send_message(embed=embed, view=OptionSelectView(), ephemeral=True)
+
+class OptionSelectView(discord.ui.View):
+    def __init__(self):
+        super().__init__(timeout=None)
+
+    @discord.ui.select(
+        placeholder="Choose an option...",
+        min_values=1,
+        max_values=1,
+        custom_id="option_select_view",
+        options=[
+            discord.SelectOption(label="Income", description="Record incoming money", emoji="💳"),
+            discord.SelectOption(label="Expense", description="Record outgoing money", emoji="💸"),
+            discord.SelectOption(label="Balance", description="Check all incoming and outgoing money", emoji="💲")
+        ]
+    )
+    async def select_callback(self, interaction: discord.Interaction, select: discord.ui.Select):
+        selected = select.values[0]
+
+        if selected == "Income":
+            embed = discord.Embed(
+                title="Record Income 💳",
+                description="",
+                color=discord.Color.from_str('#5043e2')
+            )
+            embed.add_field(
+                name="`Select Mode` | Record Income ✅",
+                value="**\n__Details:__\nClick the button below to enter the amount of income: THB 📈",
+                inline=True
+            )
+            embed.set_image(url="https://singlecolorimage.com/get/5413e2/1000x10"),
+            embed.set_author(name="Asula Summary Tools V3 🎆", icon_url="https://img5.pic.in.th/file/secure-sv1/Asula-logos-2.jpeg")
+            view = IncomeButtonView()
+        elif selected == "Expense":
+            embed = discord.Embed(
+                title="Record Expense 💸",
+                description="",
+                color=discord.Color.from_str('#5043e2')
+            )
+            embed.add_field(
+                name="`Select Mode` | Record Expense ✅",
+                value="**\n__Details:__\nClick the button below to enter the amount of expense: THB 📉",
+                inline=True
+            )
+            embed.set_image(url="https://singlecolorimage.com/get/5413e2/1000x10"),
+            embed.set_author(name="Asula Summary Tools V3 🎆", icon_url="https://img5.pic.in.th/file/secure-sv1/Asula-logos-2.jpeg")
+            view = ExpenseButtonView()
+        elif selected == "Balance":
+            user_id = interaction.user.id
+
+            conn = sqlite3.connect('finance_data.db')
+            c = conn.cursor()
+            c.execute('''
+                SELECT 
+                    SUM(CASE WHEN type = 'Income' THEN amount ELSE 0 END) AS total_income,
+                    SUM(CASE WHEN type = 'Expense' THEN amount ELSE 0 END) AS total_expense
+                FROM transactions
+                WHERE user_id = ?
+            ''', (user_id,))
+            result = c.fetchone()
+            conn.close()
+
+            total_income = result[0] if result[0] else 0.0
+            total_expense = result[1] if result[1] else 0.0
+            balance = total_income - total_expense
+
+            embed = discord.Embed(
+                title="💲 Balance",
+                description="",
+                color=discord.Color.from_str('#5043e2')
+            )
+            embed.add_field(
+                name="`Select Mode` | Balance ✅",
+                value=f"**\n__Details:__\n💳 Income: {total_income:.2f} THB\n💸 Expense: {total_expense:.2f} THB\n💲 Balance: {balance:.2f} THB",
+                inline=True
+            )
+            embed.set_image(url="https://singlecolorimage.com/get/5413e2/1000x10"),
+            embed.set_author(name="Asula Summary Tools V3 🎆", icon_url="https://img5.pic.in.th/file/secure-sv1/Asula-logos-2.jpeg")
+            view = None
+
+        await interaction.response.send_message(embed=embed, view=view, ephemeral=True)
+
+class IncomeButtonView(discord.ui.View):
+    def __init__(self):
+        super().__init__(timeout=None)
+
+    @discord.ui.button(label="💳 Record Income", style=discord.ButtonStyle.primary, custom_id="income_button")
+    async def income_button(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await interaction.response.send_modal(IncomeModal())
+
+class ExpenseButtonView(discord.ui.View):
+    def __init__(self):
+        super().__init__(timeout=None)
+
+    @discord.ui.button(label="💸 Record Expense", style=discord.ButtonStyle.primary, custom_id="expense_button")
+    async def expense_button(self, interaction: discord.Interaction, button: discord.ui.Button):
+        await interaction.response.send_modal(ExpenseModal())
+
+@bot.event
+async def on_ready():
+    logging.info(f"Logged in as {bot.user.name} (ID: {bot.user.id})")
+
+    activity = discord.Streaming(name="AsulaXI", url="https://www.twitch.tv/asulaxi", details="AsulaXI🎆")
+    await bot.change_presence(status=discord.Status.online, activity=activity)
+
+    bot.add_view(StartProcessView())
+    bot.add_view(IncomeButtonView())
+    bot.add_view(ExpenseButtonView())
+    bot.add_view(OptionSelectView())
+
+    try:
+        channel = bot.get_channel(1267441178379423906)  # Replace with your channel ID
+        embed = discord.Embed(
+            title="💻 Start Processes :",
+            description="Click the button below to start",
+            color=discord.Color.from_str('#5043e2')
+        )
+        embed.add_field(
+            name="`Start Processes` | ",
+            value="**\n__Details:__\n```javascript\n// Asula Summary Tools V.1 By Asula\nconst Asula = \"Welcome To Asula Summary Tool\";\nconsole.log(Asula);\n```",
+            inline=True
+        )
+        embed.set_image(url="https://singlecolorimage.com/get/5413e2/1000x10")
+        embed.set_author(name="Asula Summary Tools V3 🎆", icon_url="https://img5.pic.in.th/file/secure-sv1/Asula-logos-2.jpeg")
+        embed.set_thumbnail(url="https://example.com/thumbnail_image.png")
+        view = StartProcessView()
+        await channel.send(embed=embed, view=view)
+    except Exception as e:
+        logging.error(f"Failed to send start message: {e}")
+
+@bot.event
+async def on_command_error(ctx, error):
+    if isinstance(error, commands.CommandNotFound):
+        await ctx.send("Invalid command used.")
+    else:
+        logging.error(f"An error occurred: {error}")
+
+bot.run('MTI2NzQ0MTQzNTA0NTUyNzYxMw.G5LT2e.ztD72-4pBujbMYYv3DkbtzIQUTG5vWtTNzlbmc')  # Replace with your bot's token
